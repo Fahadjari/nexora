@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * The two themes.
+ *
+ * Only the variables change between them — no component knows which theme is
+ * active. That is the whole point: dark mode should be a data change, not a
+ * code change.
+ *
+ * Values are raw HSL channels ("222 47% 11%") rather than full colours, because
+ * Tailwind's `<alpha-value>` needs to inject the alpha itself. That is what lets
+ * `bg-accent/10` work — a finished `hsl(...)` string could not be made
+ * translucent this way.
+ */
+
+@layer base {
+  :root {
+    /* --- Light --- */
+    /* Not pure white. #FFFFFF against a bright screen is genuinely fatiguing
+       over an 8-hour workday, which is how long people live inside an ERP. */
+    --canvas: 210 20% 98%;
+    --surface: 0 0% 100%;
+    --muted: 210 20% 96%;
+    --border: 214 20% 91%;
+
+    --foreground: 222 47% 11%;
+    --subtle: 215 16% 47%;
+
+    --accent: 243 75% 59%;
+    --accent-foreground: 0 0% 100%;
+    --accent-subtle: 243 75% 96%;
+
+    --success: 142 71% 40%;
+    --warning: 38 92% 50%;
+    --danger: 0 72% 51%;
+  }
+
+  .dark {
+    /* --- Dark --- */
+    /* Also not pure black: OLED black makes the eye chase every edge, and
+       shadows have nothing to sit on. A very dark blue-grey reads as "dark"
+       while still allowing elevation to exist. */
+    --canvas: 222 47% 7%;
+    --surface: 222 40% 10%;
+    --muted: 217 33% 15%;
+    --border: 217 30% 18%;
+
+    --foreground: 210 20% 96%;
+    --subtle: 215 16% 60%;
+
+    /* Lifted and slightly desaturated. The light-mode indigo, unchanged, would
+       vibrate painfully against a dark background. */
+    --accent: 243 80% 70%;
+    --accent-foreground: 222 47% 8%;
+    --accent-subtle: 243 40% 18%;
+
+    --success: 142 60% 50%;
+    --warning: 38 92% 58%;
+    --danger: 0 72% 62%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-canvas text-foreground antialiased;
+    /* Kill the flash when the theme flips. */
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  /* A visible, consistent focus ring — the app must be fully usable from the
+     keyboard. `:focus-visible` rather than `:focus` so a mouse click does not
+     leave a ring behind, which is what makes people disable focus styles
+     entirely and break accessibility for everyone else. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-canvas;
+  }
+}
+
+@layer utilities {
+  /* Numbers in a column must line up. Without this, "1,240" and "980" wander
+     because proportional digits have different widths. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

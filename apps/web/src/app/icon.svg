@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!--
+    Favicon variant of the Nexora mark: NEXT (the N) + AURA (the halo).
+
+    Differences from the in-app mark, all forced by the 16px reality of a
+    browser tab:
+      • Sits on a filled squircle, so it holds its shape against any tab colour
+        instead of dissolving into the browser chrome.
+      • Strokes are thicker relative to the grid (2.5 on a 32 grid vs 2 on 24).
+        A hairline that reads fine at 24px vanishes at 16px.
+      • The aura is drawn at higher opacity than in-app (0.5 vs 0.35). Against
+        a saturated tile it needs the extra weight to register at all; on a
+        white app background it would be too loud at that value.
+      • The radiant point is enlarged for the same reason. Below ~2px a dot
+        stops being a dot and becomes a smudge.
+  -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="32" height="32" rx="8" fill="url(#g)"/>
+
+  <!-- NEXT -->
+  <path d="M9 24V9l14 14V9"
+        stroke="white"
+        stroke-width="2.5"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- AURA -->
+  <circle cx="23" cy="9" r="5" stroke="white" stroke-width="1.25" opacity="0.5"/>
+  <circle cx="23" cy="9" r="2.75" fill="white"/>
+</svg>
