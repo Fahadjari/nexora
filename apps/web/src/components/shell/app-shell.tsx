@@ -7,6 +7,7 @@ import {
   LogOut,
   Moon,
   Receipt,
+  Settings,
   Sun,
   Target,
   Users,
@@ -17,6 +18,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Logo } from '@/components/brand/logo';
+import { SubscriptionBanner } from '@/components/shell/subscription-banner';
 import { Button, cn } from '@/components/ui';
 import { useAuthStore } from '@/lib/auth-store';
 
@@ -28,6 +30,8 @@ interface NavItem {
   permission?: string;
   /** Not built yet — shown, but visibly inert rather than 404ing. */
   comingSoon?: boolean;
+  /** Highlight when the path starts with this, for items that own a subtree. */
+  matchPrefix?: string;
 }
 
 const NAV: NavItem[] = [
@@ -38,6 +42,15 @@ const NAV: NavItem[] = [
   { href: '/sales', label: 'Sales', icon: <Receipt className="h-4 w-4" />, comingSoon: true },
   { href: '/inventory', label: 'Inventory', icon: <Boxes className="h-4 w-4" />, comingSoon: true },
   { href: '/reports', label: 'Reports', icon: <BarChart3 className="h-4 w-4" />, comingSoon: true },
+  // No permission gate: everyone may open Settings. What they can *do* there is
+  // decided per tab (team needs member:read, purchasing needs tenant:billing) —
+  // and every member deserves to see when the trial ends.
+  {
+    href: '/settings/billing',
+    label: 'Settings',
+    icon: <Settings className="h-4 w-4" />,
+    matchPrefix: '/settings',
+  },
 ];
 
 function ThemeToggle() {
@@ -106,7 +119,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             // rejects the call regardless. See auth-store's `can()`.
             if (item.permission && !can(item.permission)) return null;
 
-            const active = pathname === item.href;
+            const active = item.matchPrefix
+              ? pathname.startsWith(item.matchPrefix)
+              : pathname === item.href;
 
             if (item.comingSoon) {
               return (
@@ -169,6 +184,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       {/* --- Main --- */}
       <div className="flex flex-1 flex-col lg:pl-60">
+        {/* Above the header on purpose: subscription state outranks navigation.
+            When the workspace is locked, this is the first thing seen on every
+            page — which is exactly the promise the 402 errors rely on. */}
+        <SubscriptionBanner />
+
         <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-border bg-canvas/80 px-5 backdrop-blur">
           <div className="lg:hidden">
             <Logo gradient markOnly />

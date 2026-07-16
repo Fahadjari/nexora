@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'sonner';
@@ -121,6 +122,13 @@ export default function LoginPage() {
             </Button>
           </form>
         </Card>
+
+        <p className="mt-5 text-center text-[13px] text-subtle">
+          New to Nexora?{' '}
+          <Link href="/register" className="font-medium text-accent hover:underline">
+            Start a free 14-day trial
+          </Link>
+        </p>
 
         {/* Development affordance. It would be removed before this ever met a
             real customer — but while building, retyping a password on every
