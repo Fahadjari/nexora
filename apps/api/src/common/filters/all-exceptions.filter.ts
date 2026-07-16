@@ -106,6 +106,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
     details?: Record<string, string[]>;
   } {
     const status = exception.getStatus();
+
+    // The throttler's stock message is "ThrottlerException: Too Many Requests" —
+    // a stack-trace fragment, not a sentence. The person seeing it is usually
+    // someone who just retried a failing form in frustration; tell them the one
+    // thing they need to know, which is that waiting fixes it.
+    if (status === HttpStatus.TOO_MANY_REQUESTS) {
+      return {
+        status,
+        code: 'RATE_LIMITED',
+        message: 'Too many attempts. Give it a minute, then try again.',
+      };
+    }
+
     const payload = exception.getResponse();
 
     if (typeof payload === 'string') {
@@ -115,9 +128,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const record = payload as Record<string, unknown>;
     const rawMessage = record.message;
 
-    // Nest's ValidationPipe hands us `message: string[]` — one entry per failed
-    // constraint. Fold those into the details map so the client can attach them
-    // to fields instead of dumping a list.
+    // Legacy shape: a bare `message: string[]` with no field names. The global
+    // ValidationPipe now emits proper per-field `details` instead (see main.ts),
+    // so this only catches exceptions thrown by hand with an array message.
     if (Array.isArray(rawMessage)) {
       return {
         status,
@@ -131,6 +144,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       status,
       code: (record.code as string) ?? this.statusToCode(status),
       message: (rawMessage as string) ?? exception.message,
+      // Pass field-level details through untouched — the web client attaches
+      // them under the matching inputs. Dropping this line is the difference
+      // between "Password must be at least 12 characters" under the field and
+      // a form that fails with no visible reason.
+      ...(record.details ? { details: record.details as Record<string, string[]> } : {}),
     };
   }
 

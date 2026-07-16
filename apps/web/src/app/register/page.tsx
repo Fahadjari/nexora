@@ -81,8 +81,15 @@ export default function RegisterPage() {
       if (error instanceof ApiRequestError) {
         setFieldErrors(error.fieldErrors);
 
-        if (Object.keys(error.fieldErrors).length === 0) {
-          toast.error(error.message);
+        // Never fail silently. If the API's field errors all landed on inputs
+        // this form renders, the inline messages carry it — but if none did
+        // (or there were none), the user must still SEE something. A form that
+        // swallows its own failure gets clicked four times and then throttled,
+        // which is strictly worse than any error message.
+        const visible = Object.keys(error.fieldErrors).some((field) => field in form);
+
+        if (!visible) {
+          toast.error(Object.values(error.fieldErrors)[0] ?? error.message);
         }
       } else {
         toast.error('Could not reach the server. Please try again.');
@@ -161,10 +168,15 @@ export default function RegisterPage() {
               type="password"
               autoComplete="new-password"
               required
+              // 12, because that is what the API actually enforces. A hint that
+              // promises 8 while the server demands 12 manufactures a rejection
+              // for every user who takes the hint at its word.
+              minLength={12}
               value={form.password}
               onChange={(event) => update('password', event.target.value)}
               error={fieldErrors.password}
-              placeholder="At least 8 characters"
+              placeholder="At least 12 characters"
+              hint="A short sentence works well — long beats clever."
             />
 
             <Button type="submit" loading={submitting} className="w-full">

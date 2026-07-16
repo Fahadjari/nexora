@@ -1,10 +1,37 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Logger, ValidationPipe, type ValidationError } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import type { AppConfig } from './config/configuration';
+
+/**
+ * `ValidationError[]` → `{ "password": ["Password must be…"], … }`.
+ *
+ * Nested DTOs produce nested errors; those flatten to dotted paths
+ * ("customer.name") so the client can still find the input they belong to.
+ */
+function flattenValidationErrors(
+  errors: ValidationError[],
+  parentPath = '',
+): Record<string, string[]> {
+  const details: Record<string, string[]> = {};
+
+  for (const error of errors) {
+    const path = parentPath ? `${parentPath}.${error.property}` : error.property;
+
+    if (error.constraints) {
+      details[path] = Object.values(error.constraints);
+    }
+
+    if (error.children?.length) {
+      Object.assign(details, flattenValidationErrors(error.children, path));
+    }
+  }
+
+  return details;
+}
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
@@ -45,6 +72,20 @@ async function bootstrap(): Promise<void> {
       forbidNonWhitelisted: true,
       transform: true,
       transformOptions: { enableImplicitConversion: false },
+      // Keep the FIELD NAMES on validation errors.
+      //
+      // Nest's default flattens every failure into `message: string[]` — a bag
+      // of sentences with no record of which field each one belongs to. The web
+      // client attaches errors *under their inputs*; hand it a bag and it can
+      // attach nothing, and the user watches a form fail in total silence.
+      // That is not hypothetical: it is exactly what happened to the first
+      // person who tried to register with an 11-character password.
+      exceptionFactory: (errors: ValidationError[]) =>
+        new BadRequestException({
+          code: 'VALIDATION_FAILED',
+          message: 'The request body failed validation.',
+          details: flattenValidationErrors(errors),
+        }),
     }),
   );
 

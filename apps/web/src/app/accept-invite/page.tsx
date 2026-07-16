@@ -84,8 +84,12 @@ function AcceptInviteInner() {
       if (submitError instanceof ApiRequestError) {
         setFieldErrors(submitError.fieldErrors);
 
-        if (Object.keys(submitError.fieldErrors).length === 0) {
-          toast.error(submitError.message);
+        // Never silent — same rule as the register page. If no returned field
+        // error lands on an input this form renders, say it out loud.
+        const visible = Object.keys(submitError.fieldErrors).some((field) => field in form);
+
+        if (!visible) {
+          toast.error(Object.values(submitError.fieldErrors)[0] ?? submitError.message);
         }
       } else {
         toast.error('Could not reach the server. Please try again.');
@@ -182,12 +186,13 @@ function AcceptInviteInner() {
                 type="password"
                 autoComplete="new-password"
                 required
+                minLength={12}
                 value={form.password}
                 onChange={(event) =>
                   setForm((previous) => ({ ...previous, password: event.target.value }))
                 }
                 error={fieldErrors.password}
-                placeholder="At least 8 characters"
+                placeholder="At least 12 characters"
                 hint={`Your sign-in will be ${invite.email}`}
               />
 

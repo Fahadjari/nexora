@@ -46,11 +46,12 @@ export class AcceptInviteDto {
   @MaxLength(100)
   lastName: string;
 
-  @ApiProperty({ example: 'a-strong-password', minLength: 8 })
+  @ApiProperty({ example: 'correct horse battery staple', minLength: 12 })
   @IsString()
-  // 8 is the floor, not a recommendation. The real defence is Argon2id plus
-  // rate-limited login; a length rule mostly stops the worst accidents.
-  @MinLength(8)
+  // The same floor as registration (see RegisterDto), on purpose. An invited
+  // employee's password guards the same books as the owner's — a weaker rule
+  // for them would make every invite a discount on the workspace's security.
+  @MinLength(12, { message: 'Password must be at least 12 characters.' })
   @MaxLength(200)
   password: string;
 }
