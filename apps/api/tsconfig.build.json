@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  // The build compiles ONLY src.
+  //
+  // tsconfig.json deliberately includes `prisma/` and `test/` so that
+  // `tsc --noEmit` typechecks the seed script and the e2e specs. But those
+  // extra roots widen TypeScript's inferred rootDir from `src/` to the package
+  // root, which silently moves the entry point from `dist/main.js` to
+  // `dist/src/main.js` and breaks `npm start`.
+  //
+  // `nest build` picks this file up automatically when it exists, so the
+  // shipped bundle stays flat while the typechecker still sees everything.
+  "exclude": ["node_modules", "dist", "test", "prisma", "**/*.spec.ts", "**/*.e2e-spec.ts"]
+}

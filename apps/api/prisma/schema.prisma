@@ -1,0 +1,769 @@
+// ---------------------------------------------------------------------------
+// Nexora data model
+//
+// Tenancy rule: every business record carries a `tenantId`. Nothing in the app
+// layer is trusted to remember that — the Prisma client extension in
+// `src/modules/prisma/tenant-scope.extension.ts` injects and verifies it on
+// every query.
+//
+// Naming: Prisma models and fields are camelCase (idiomatic TypeScript); the
+// database is snake_case (idiomatic Postgres). Every multi-word field carries
+// an explicit `@map`, and every model an `@@map`. This is deliberate — without
+// it, Postgres folds unquoted identifiers to lowercase, so a `resourceId`
+// column can only ever be reached as `"resourceId"` with double quotes. Every
+// raw query, every psql session, every BI tool and every DBA then pays that tax
+// forever. Fixing it later means a migration across every table.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ===========================================================================
+// Tenancy & identity
+// ===========================================================================
+
+enum TenantStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+}
+
+enum TenantPlan {
+  FREE
+  STARTER
+  GROWTH
+  ENTERPRISE
+}
+
+/// A company workspace. The isolation boundary for all business data.
+model Tenant {
+  id     String       @id @default(uuid()) @db.Uuid
+  /// URL-safe workspace identifier, e.g. `acme-trading`.
+  slug   String       @unique
+  name   String
+  status TenantStatus @default(TRIAL)
+  plan   TenantPlan   @default(FREE)
+
+  /// Industry vertical. Drives which optional modules are offered.
+  industry String?
+  country  String  @default("IN")
+  currency String  @default("INR")
+  timezone String  @default("Asia/Kolkata")
+  /// Tax registration (GSTIN in India, VAT ID in the EU, and so on).
+  taxId    String? @map("tax_id")
+  logoUrl  String? @map("logo_url")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  memberships  Membership[]
+  roles        Role[]
+  auditLogs    AuditLog[]
+  leads        Lead[]
+  customers    Customer[]
+  contacts     Contact[]
+  pipelines    Pipeline[]
+  deals        Deal[]
+  activities   Activity[]
+  notes        Note[]
+  subscription Subscription?
+  invitations  Invitation[]
+
+  @@index([status])
+  @@index([deletedAt])
+  @@map("tenants")
+}
+
+/// A human. Identity is global: one person may belong to several tenants,
+/// which is why credentials live here and permissions live on Membership.
+model User {
+  id           String  @id @default(uuid()) @db.Uuid
+  email        String  @unique
+  /// Null for users who only ever sign in through an OAuth provider.
+  passwordHash String? @map("password_hash")
+  firstName    String  @map("first_name")
+  lastName     String  @map("last_name")
+  avatarUrl    String? @map("avatar_url")
+  phone        String?
+
+  emailVerifiedAt DateTime? @map("email_verified_at")
+
+  // --- Two-factor authentication (TOTP) ---
+  twoFactorEnabled Boolean @default(false) @map("two_factor_enabled")
+  /// Encrypted at rest by CryptoService — never store a raw TOTP secret.
+  twoFactorSecret  String? @map("two_factor_secret")
+  /// Encrypted, single-use recovery codes.
+  twoFactorRecoveryCodes String[] @default([]) @map("two_factor_recovery_codes")
+
+  /// True for Nexora staff. The only identity that may cross tenant lines.
+  isSuperAdmin Boolean @default(false) @map("is_super_admin")
+
+  lastLoginAt DateTime? @map("last_login_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  memberships     Membership[]
+  identities      OAuthIdentity[]
+  refreshTokens   RefreshToken[]
+  auditLogs       AuditLog[]
+  sentInvitations Invitation[]    @relation("InvitationSender")
+
+  ownedLeads         Lead[]     @relation("LeadOwner")
+  ownedCustomers     Customer[] @relation("CustomerOwner")
+  ownedDeals         Deal[]     @relation("DealOwner")
+  assignedActivities Activity[] @relation("ActivityAssignee")
+  authoredNotes      Note[]
+
+  @@index([email])
+  @@index([deletedAt])
+  @@map("users")
+}
+
+enum AuthProvider {
+  GOOGLE
+  MICROSOFT
+}
+
+/// Links a federated identity to a Nexora user.
+model OAuthIdentity {
+  id     String       @id @default(uuid()) @db.Uuid
+  userId String       @map("user_id") @db.Uuid
+  provider AuthProvider
+  /// The provider's stable subject identifier ("sub").
+  providerUserId String @map("provider_user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("oauth_identities")
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+/// A user's seat inside one tenant. Carries the role, and therefore the
+/// permissions, for that tenant only.
+model Membership {
+  id       String           @id @default(uuid()) @db.Uuid
+  userId   String           @map("user_id") @db.Uuid
+  tenantId String           @map("tenant_id") @db.Uuid
+  roleId   String           @map("role_id") @db.Uuid
+  status   MembershipStatus @default(INVITED)
+
+  /// Optional org placement, used by the HR module and for approval routing.
+  jobTitle String? @map("job_title")
+
+  invitedAt  DateTime  @default(now()) @map("invited_at")
+  acceptedAt DateTime? @map("accepted_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  deletedAt  DateTime? @map("deleted_at")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  /// One seat per person per workspace.
+  @@unique([userId, tenantId])
+  @@index([tenantId, status])
+  @@index([userId])
+  @@map("memberships")
+}
+
+// ===========================================================================
+// RBAC
+//
+// Permissions are strings shaped `resource:action` (e.g. `crm.lead:create`),
+// held as an array on the role. Roles are per-tenant and fully editable, so
+// an owner can build "Warehouse Supervisor" without a schema change.
+// ===========================================================================
+
+model Role {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+  /// Stable machine key, e.g. `owner`, `sales_executive`.
+  key      String
+  name     String
+  description String?
+
+  /// Permission strings granted by this role. `*` grants everything.
+  permissions String[] @default([])
+
+  /// Seeded roles cannot be renamed or deleted, only copied.
+  isSystem Boolean @default(false) @map("is_system")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  invitations Invitation[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@map("roles")
+}
+
+// ===========================================================================
+// Auth tokens
+// ===========================================================================
+
+/// Refresh tokens are rotated on every use. We store a hash, never the token.
+/// Reuse of an already-rotated token means the token was stolen, so the whole
+/// family is revoked — see TokenService.rotate().
+model RefreshToken {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  tokenHash String @unique @map("token_hash")
+  /// Groups a chain of rotated tokens so a whole lineage can be killed at once.
+  familyId  String @map("family_id") @db.Uuid
+
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  /// Set when this token is rotated, so replay of the old value is detectable.
+  rotatedAt DateTime? @map("rotated_at")
+
+  userAgent String?  @map("user_agent")
+  ipAddress String?  @map("ip_address")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+// ===========================================================================
+// Audit
+// ===========================================================================
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  EXPORT
+  PERMISSION_CHANGE
+  AI_ACTION
+}
+
+/// Append-only record of every consequential action.
+model AuditLog {
+  id       String  @id @default(uuid()) @db.Uuid
+  tenantId String? @map("tenant_id") @db.Uuid
+  userId   String? @map("user_id") @db.Uuid
+
+  action AuditAction
+  /// The entity type touched, e.g. `Lead`.
+  resource   String
+  resourceId String? @map("resource_id")
+
+  /// Field-level before/after. Values flagged sensitive are redacted upstream.
+  changes  Json?
+  metadata Json?
+
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, resource, resourceId])
+  @@index([userId])
+  @@map("audit_logs")
+}
+
+// ===========================================================================
+// CRM
+// ===========================================================================
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  UNQUALIFIED
+  CONVERTED
+}
+
+enum LeadSource {
+  WEBSITE
+  REFERRAL
+  COLD_CALL
+  EMAIL_CAMPAIGN
+  SOCIAL_MEDIA
+  TRADE_SHOW
+  PARTNER
+  OTHER
+}
+
+model Lead {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  firstName   String  @map("first_name")
+  lastName    String  @map("last_name")
+  email       String?
+  phone       String?
+  companyName String? @map("company_name")
+  jobTitle    String? @map("job_title")
+
+  status LeadStatus @default(NEW)
+  source LeadSource @default(OTHER)
+
+  /// Expected deal size, in the tenant's currency. Decimal, never float —
+  /// binary floats cannot represent money exactly.
+  estimatedValue Decimal? @map("estimated_value") @db.Decimal(18, 2)
+
+  // --- AI lead scoring (written by the scoring worker, never by hand) ---
+  /// 0–100. Null until the scoring job has run.
+  aiScore       Int?      @map("ai_score")
+  /// Model's plain-language justification, shown in the UI next to the score.
+  aiScoreReason String?   @map("ai_score_reason")
+  aiScoredAt    DateTime? @map("ai_scored_at")
+
+  ownerId String? @map("owner_id") @db.Uuid
+
+  /// Set when the lead is converted, linking forward to the customer created.
+  convertedCustomerId String?   @map("converted_customer_id") @db.Uuid
+  convertedAt         DateTime? @map("converted_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner      User?      @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  activities Activity[]
+  notes      Note[]
+
+  // Every read path is tenant-scoped, so each index leads with tenantId.
+  @@index([tenantId, status])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, aiScore])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, deletedAt])
+  @@map("leads")
+}
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  CHURNED
+}
+
+model Customer {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  name     String
+  email    String?
+  phone    String?
+  website  String?
+  /// GSTIN / VAT number.
+  taxId    String? @map("tax_id")
+  industry String?
+
+  billingAddress  Json? @map("billing_address")
+  shippingAddress Json? @map("shipping_address")
+
+  status CustomerStatus @default(ACTIVE)
+  /// Payment terms in days, used by Accounting to age receivables.
+  paymentTermDays Int      @default(30) @map("payment_term_days")
+  creditLimit     Decimal? @map("credit_limit") @db.Decimal(18, 2)
+
+  // --- AI churn risk (written by the Customer Success agent) ---
+  /// 0–100, higher means likelier to churn.
+  aiRiskScore  Int?      @map("ai_risk_score")
+  aiRiskReason String?   @map("ai_risk_reason")
+  aiScoredAt   DateTime? @map("ai_scored_at")
+
+  ownerId String? @map("owner_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  owner      User?      @relation("CustomerOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  contacts   Contact[]
+  deals      Deal[]
+  activities Activity[]
+  notes      Note[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, name])
+  @@index([tenantId, deletedAt])
+  @@map("customers")
+}
+
+model Contact {
+  id         String @id @default(uuid()) @db.Uuid
+  tenantId   String @map("tenant_id") @db.Uuid
+  customerId String @map("customer_id") @db.Uuid
+
+  firstName String  @map("first_name")
+  lastName  String  @map("last_name")
+  email     String?
+  phone     String?
+  jobTitle  String? @map("job_title")
+  /// The decision maker for this account. At most one per customer, enforced
+  /// in ContactsService rather than by a constraint, since "primary" changes
+  /// hands often and a partial unique index would make reassignment a dance.
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer   Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  activities Activity[]
+
+  @@index([tenantId, customerId])
+  @@index([tenantId, email])
+  @@map("contacts")
+}
+
+/// A named sales process. Tenants may run several (e.g. "New Business" and
+/// "Renewals") with different stages.
+model Pipeline {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  name      String
+  isDefault Boolean @default(false) @map("is_default")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  stages PipelineStage[]
+  deals  Deal[]
+
+  @@index([tenantId])
+  @@map("pipelines")
+}
+
+model PipelineStage {
+  id         String @id @default(uuid()) @db.Uuid
+  pipelineId String @map("pipeline_id") @db.Uuid
+
+  name String
+  /// Display order, ascending.
+  position Int
+  /// Historical win rate at this stage, 0–100. Feeds weighted forecasting.
+  probability Int @default(0)
+
+  /// Marks the terminal stages. A deal in one of these is no longer open.
+  isWon  Boolean @default(false) @map("is_won")
+  isLost Boolean @default(false) @map("is_lost")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals    Deal[]
+
+  @@unique([pipelineId, position])
+  @@index([pipelineId])
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  title             String
+  value             Decimal   @db.Decimal(18, 2)
+  currency          String    @default("INR")
+  expectedCloseDate DateTime? @map("expected_close_date")
+  closedAt          DateTime? @map("closed_at")
+
+  pipelineId String  @map("pipeline_id") @db.Uuid
+  stageId    String  @map("stage_id") @db.Uuid
+  customerId String? @map("customer_id") @db.Uuid
+  ownerId    String? @map("owner_id") @db.Uuid
+
+  /// Why a lost deal was lost. Training signal for the loss-prediction model.
+  lostReason String? @map("lost_reason")
+
+  // --- AI win prediction ---
+  aiWinProbability Int?      @map("ai_win_probability")
+  aiInsight        String?   @map("ai_insight")
+  aiScoredAt       DateTime? @map("ai_scored_at")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant     Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  pipeline   Pipeline      @relation(fields: [pipelineId], references: [id])
+  stage      PipelineStage @relation(fields: [stageId], references: [id])
+  customer   Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  owner      User?         @relation("DealOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  activities Activity[]
+  notes      Note[]
+
+  @@index([tenantId, stageId])
+  @@index([tenantId, ownerId])
+  @@index([tenantId, expectedCloseDate])
+  @@index([tenantId, deletedAt])
+  @@map("deals")
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  NOTE
+}
+
+enum ActivityStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+/// A scheduled or logged touchpoint. Polymorphic: hangs off whichever CRM
+/// record it concerns. Exactly one of the four foreign keys is set — enforced
+/// in ActivitiesService, since Postgres cannot express "exactly one of N".
+model Activity {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  type    ActivityType
+  status  ActivityStatus @default(PENDING)
+  subject String
+  body    String?
+
+  dueAt       DateTime? @map("due_at")
+  completedAt DateTime? @map("completed_at")
+
+  assigneeId String? @map("assignee_id") @db.Uuid
+  leadId     String? @map("lead_id") @db.Uuid
+  customerId String? @map("customer_id") @db.Uuid
+  contactId  String? @map("contact_id") @db.Uuid
+  dealId     String? @map("deal_id") @db.Uuid
+
+  /// True when an AI agent created this (e.g. a suggested follow-up), so the
+  /// UI can badge it and the user can tell machine work from their own.
+  isAiGenerated Boolean @default(false) @map("is_ai_generated")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  assignee User?     @relation("ActivityAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  contact  Contact?  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  deal     Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, assigneeId, status])
+  @@index([tenantId, dueAt])
+  @@index([tenantId, leadId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, dealId])
+  @@map("activities")
+}
+
+// ===========================================================================
+// Billing
+//
+// Nexora is sold per seat, per plan tier, after a 14-day trial that needs no
+// card. Three rules follow from that, and the schema exists to serve them:
+//
+//   1. A trial must be able to *end*. `trialEndsAt` is the only thing standing
+//      between a free trial and a free product.
+//   2. A seat must be countable, and countable cheaply — it is checked on every
+//      invite.
+//   3. When a customer stops paying, they lose access to the software, never to
+//      their data. There is no `deletedAt` cascade here, and expiry drops the
+//      workspace to read-only rather than dark. Holding a company's books
+//      hostage over a failed card is how you earn a chargeback and a lawsuit.
+// ===========================================================================
+
+enum SubscriptionStatus {
+  /// In the 14-day trial. Full access, no card on file.
+  TRIALING
+  /// Paid and current.
+  ACTIVE
+  /// A payment failed. Still fully usable during the grace period — cards
+  /// expire, and locking a paying customer out over a bank hiccup is a good way
+  /// to lose one.
+  PAST_DUE
+  /// Cancelled by the customer, but paid up to the end of the period.
+  CANCELLED
+  /// The trial ran out, or a cancelled period ended. Read-only until they pay.
+  EXPIRED
+}
+
+/// One per tenant. The billing state of a company.
+model Subscription {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @unique @map("tenant_id") @db.Uuid
+
+  plan   TenantPlan
+  status SubscriptionStatus @default(TRIALING)
+
+  /// Seats *purchased*, not seats used. The 11th invite on a 10-seat plan is
+  /// refused with an upgrade prompt — see MembersService.invite.
+  seats Int @default(5)
+
+  /// When the free trial ends. Null once they are paying.
+  trialEndsAt DateTime? @map("trial_ends_at")
+  /// End of the paid period — the moment a CANCELLED subscription goes EXPIRED.
+  currentPeriodEnd DateTime? @map("current_period_end")
+  /// When the first payment failed. Starts the grace clock.
+  pastDueSince DateTime? @map("past_due_since")
+
+  /// They cancelled, but keep access until `currentPeriodEnd`. Not the same as
+  /// cancelled-and-gone, and conflating the two bills people for nothing.
+  cancelAtPeriodEnd Boolean @default(false) @map("cancel_at_period_end")
+
+  // --- Payment provider (Razorpay today; the adapter decides) ---
+  /// Which adapter owns this subscription. Null while on trial with no card.
+  provider               String? @db.VarChar(32)
+  providerCustomerId     String? @map("provider_customer_id")
+  /// Unique: two tenants pointing at one provider subscription would mean a
+  /// webhook could not tell which company it was about.
+  providerSubscriptionId String? @unique @map("provider_subscription_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// The trial-expiry job sweeps on this.
+  @@index([status, trialEndsAt])
+  @@index([status, currentPeriodEnd])
+  @@map("subscriptions")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+/// An outstanding offer of a seat.
+///
+/// Separate from Membership on purpose. A Membership needs a `userId`, and the
+/// person you are inviting may not have a Nexora account yet — that is the
+/// common case, not the edge one. Creating a shell User to hold the invite
+/// would mean an unverified, passwordless row in the users table that an
+/// attacker could try to claim.
+model Invitation {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  email  String
+  roleId String @map("role_id") @db.Uuid
+  status InvitationStatus @default(PENDING)
+
+  /// SHA-256 of the token that was emailed. The raw token is shown once, to the
+  /// sender, and never stored — an invite link in a leaked database backup would
+  /// otherwise be a free seat in someone's workspace.
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+
+  invitedById String    @map("invited_by_id") @db.Uuid
+  acceptedAt  DateTime? @map("accepted_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role      Role   @relation(fields: [roleId], references: [id])
+  invitedBy User   @relation("InvitationSender", fields: [invitedById], references: [id])
+
+  /// Deliberately NOT a unique on (tenantId, email): an invite that was revoked
+  /// or expired must be re-sendable, and a unique index would block that. One
+  /// live invite per address is enforced in the service, where "live" can mean
+  /// something.
+  @@index([tenantId, status])
+  @@index([email])
+  @@map("invitations")
+}
+
+/// Every webhook the payment provider has ever sent us.
+///
+/// Exists for exactly one reason: idempotency. Providers retry, and they
+/// deliver out of order and more than once — that is the contract, not a bug.
+/// Processing `payment.captured` twice would extend a subscription twice.
+/// `providerEventId` is unique, so the second delivery loses the insert race
+/// and is dropped.
+model WebhookEvent {
+  id String @id @default(uuid()) @db.Uuid
+
+  provider        String  @db.VarChar(32)
+  providerEventId String  @map("provider_event_id")
+  type            String
+
+  payload     Json
+  processedAt DateTime? @map("processed_at")
+  /// Set when handling threw. Keeps the row for replay instead of losing it.
+  error       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  /// The idempotency key itself. Scoped by provider, since two providers may
+  /// coincidentally issue the same event id.
+  @@unique([provider, providerEventId])
+  @@index([processedAt])
+  @@map("webhook_events")
+}
+
+model Note {
+  id       String @id @default(uuid()) @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
+
+  body     String
+  authorId String @map("author_id") @db.Uuid
+
+  leadId     String? @map("lead_id") @db.Uuid
+  customerId String? @map("customer_id") @db.Uuid
+  dealId     String? @map("deal_id") @db.Uuid
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  author   User      @relation(fields: [authorId], references: [id])
+  lead     Lead?     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  deal     Deal?     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, leadId])
+  @@index([tenantId, customerId])
+  @@index([tenantId, dealId])
+  @@map("notes")
+}
