@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="Nexora mark">
+  <!--
+    The standalone mark on its squircle tile — for avatars, social cards and
+    anywhere the wordmark does not fit. Mirrors the favicon (apps/web/src/app/
+    icon.svg) at higher resolution.
+  -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="96" y2="96" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="96" height="96" rx="24" fill="url(#g)"/>
+
+  <!-- NEXT -->
+  <path d="M27 72V27l42 42V27"
+        stroke="white" stroke-width="7.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- AURA -->
+  <circle cx="69" cy="27" r="15" stroke="white" stroke-width="3.75" opacity="0.5"/>
+  <circle cx="69" cy="27" r="8.25" fill="white"/>
+</svg>

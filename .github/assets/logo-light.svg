@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 88" fill="none" role="img" aria-label="Nexora">
+  <!--
+    Nexora lockup for light backgrounds (README hero).
+
+    Same geometry as the in-app mark (see apps/web/src/components/brand/logo.tsx):
+    NEXT — the N whose diagonal climbs up and forward; AURA — the radiant point
+    in a halo at the terminus of the climb. The intelligence is where you are
+    going, not where you have been.
+  -->
+  <defs>
+    <linearGradient id="g" x1="8" y1="8" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- The mark, on a 24-grid scaled ×3 and offset to sit on the baseline. -->
+  <g transform="translate(8 8) scale(3)">
+    <!-- NEXT -->
+    <path d="M5 19V5l14 14V5"
+          stroke="url(#g)" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- AURA -->
+    <circle cx="19" cy="5" r="4.25" stroke="url(#g)" stroke-width="1" opacity="0.35"/>
+    <circle cx="19" cy="5" r="2.25" fill="url(#g)"/>
+  </g>
+
+  <!-- Wordmark. System font stack so it renders everywhere GitHub does. -->
+  <text x="96" y="61"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="44" font-weight="650" letter-spacing="-1.5"
+        fill="#0F172A">Nexora</text>
+</svg>

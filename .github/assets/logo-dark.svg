@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 88" fill="none" role="img" aria-label="Nexora">
+  <!--
+    Nexora lockup for dark backgrounds. Identical geometry to logo-light.svg;
+    only the wordmark colour changes. The gradient mark survives both themes
+    untouched — that is the point of picking indigo→violet, which holds contrast
+    against white and near-black alike.
+  -->
+  <defs>
+    <linearGradient id="g" x1="8" y1="8" x2="80" y2="80" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6366F1"/>
+      <stop offset="1" stop-color="#8B5CF6"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(8 8) scale(3)">
+    <!-- NEXT -->
+    <path d="M5 19V5l14 14V5"
+          stroke="url(#g)" stroke-width="2"
+          stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- AURA -->
+    <circle cx="19" cy="5" r="4.25" stroke="url(#g)" stroke-width="1" opacity="0.35"/>
+    <circle cx="19" cy="5" r="2.25" fill="url(#g)"/>
+  </g>
+
+  <text x="96" y="61"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+        font-size="44" font-weight="650" letter-spacing="-1.5"
+        fill="#F8FAFC">Nexora</text>
+</svg>
